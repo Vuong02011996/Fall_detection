@@ -54,5 +54,5 @@ docs/_build/
 task.md
 *.pdf
 *.png
-
+Models/*
 
