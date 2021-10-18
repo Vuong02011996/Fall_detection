@@ -23,7 +23,7 @@ class InfoCam(object):
         self.cap = cv2.VideoCapture(cam_name)
 
 
-def video_capture(cam, frame_detect_queue, frame_origin_queue):
+def video_capture(cam, frame_detect_queue):
     frame_count = 0
 
     cam.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count)
@@ -33,8 +33,7 @@ def video_capture(cam, frame_detect_queue, frame_origin_queue):
         if not ret:
             break
         image_rgb = cv2.cvtColor(frame_ori, cv2.COLOR_BGR2RGB)
-        frame_detect_queue.put(image_rgb)
-        frame_origin_queue.put([frame_ori, frame_count])
+        frame_detect_queue.put([image_rgb, frame_count])
         print("frame_count: ", frame_count)
         frame_count += 1
 
@@ -43,11 +42,11 @@ def video_capture(cam, frame_detect_queue, frame_origin_queue):
 
 def inference(cam, frame_detect_queue, detections_queue): #, tracking_queue):
     while cam.cap.isOpened():
-        image_rgb = frame_detect_queue.get()
+        image_rgb, frame_count = frame_detect_queue.get()
         boxes, labels, scores, detections_sort = y5_model.predict_sort(image_rgb, label_select=["person"])
         # for i in range(len(scores)):
         #     detections_tracking = bboxes[i].append(scores[i])
-        detections_queue.put([boxes, labels, scores, image_rgb, detections_sort])
+        detections_queue.put([boxes, labels, scores, image_rgb, detections_sort, frame_count])
         # tracking_queue.put([detections_tracking])
 
     cam.cap.release()
@@ -80,10 +79,10 @@ def to_tlwh(tlbr):
     return box
 
 
-def tracking(cam, frame_origin_queue, detections_queue, tracking_queue):
+def tracking(cam, detections_queue, tracking_queue, pose_queue):
     """
     :param cam:
-    :param frame_origin_queue:
+    :param pose_queue:
     :param detections_queue:
     :param tracking_queue:
     :return:
@@ -98,22 +97,37 @@ def tracking(cam, frame_origin_queue, detections_queue, tracking_queue):
                              [0, 1440]])
 
     while cam.cap.isOpened():
-        boxes, labels, scores, image_rgb, detections_sort = detections_queue.get()
+        boxes, labels, scores, image_rgb, detections_sort, frame_count = detections_queue.get()
         if len(boxes) == 0:
             detections = np.empty((0, 5))
         else:
             detections = detections_sort
             # check and select the detection is inside region tracking
-            detections = untils_track.select_bbox_inside_polygon(detections, region_track)
+            # detections = untils_track.select_bbox_inside_polygon(detections, region_track)
 
         track_bbs_ids, unm_trk_ext = mot_tracker.update(detections, image=image_rgb)
         # print("labels, scores", labels, scores)
         # print(track_bbs_ids)
-        tracking_queue.put([track_bbs_ids, boxes, labels, scores, unm_trk_ext])
+        if len(track_bbs_ids) > 0:
+            a = 0
+        tracking_queue.put([track_bbs_ids, boxes, labels, scores, unm_trk_ext, image_rgb, frame_count])
+        pose_queue.put([image_rgb, boxes, scores])
 
-        boxes = torch.as_tensor(boxes)
-        scores = torch.as_tensor(scores)
-        poses = pose_model.predict(image_rgb, boxes, scores)
+    cam.cap.release()
+
+
+def pose_estimate(cam, pose_queue, pose_draw_queue):
+    while cam.cap.isOpened():
+
+        image_rgb, boxes, scores = pose_queue.get()
+        if len(scores) > 0:
+            boxes = torch.as_tensor(boxes)
+            scores = torch.as_tensor(scores)
+            try:
+                poses = pose_model.predict(image_rgb, boxes, scores)
+                print("poses", poses)
+            except Exception as e:
+                print(e)
         """
         poses [{'bbox': tensor([333,  76, 687, 559]), 'bbox_score': tensor(0.51725), 'keypoints': tensor([[435.36005, 168.51997],
         [488.46002, 221.61998],
@@ -141,15 +155,14 @@ def tracking(cam, frame_origin_queue, detections_queue, tracking_queue):
         [0.79748],
         [0.87007]]), 'proposal_score': tensor([2.40403])}]
         """
-        print("poses", poses)
 
     cam.cap.release()
 
 
-def drawing(cam, tracking_queue, frame_origin_queue, frame_final_queue, show_det=True):
+def drawing(cam, tracking_queue, frame_final_queue, show_det=False):
     while cam.cap.isOpened():
-        frame_origin, frame_count = frame_origin_queue.get()
-        track_bbs_ids, boxes, labels, scores, unm_trk_ext = tracking_queue.get()
+        track_bbs_ids, boxes, labels, scores, unm_trk_ext, image_rgb, frame_count = tracking_queue.get()
+        frame_origin = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
         if frame_origin is not None:
             image = draw_boxes_tracking(frame_origin, track_bbs_ids, scores=scores, labels=labels,
                                         class_names=class_names, track_bbs_ext=unm_trk_ext)
@@ -171,17 +184,19 @@ def save_debug_image(frame_count, image):
 
 def main():
     frame_detect_queue = Queue(maxsize=1)
-    frame_origin_queue = Queue(maxsize=1)
+    pose_queue = Queue(maxsize=1)
+    pose_draw_queue = Queue(maxsize=1)
     detections_queue = Queue(maxsize=1)
     tracking_queue = Queue(maxsize=1)
     frame_final_queue = Queue(maxsize=1)
-    input_path = "/home/vuong/Downloads/fall_detect.mp4"
+    input_path = "https://minio.core.greenlabs.ai/clover/fall_detection/fall_detect.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20211018%2F%2Fs3%2Faws4_request&X-Amz-Date=20211018T063245Z&X-Amz-Expires=432000&X-Amz-SignedHeaders=host&X-Amz-Signature=e711d8737a4f22831169fdfc7008e66e22eb024a853b430ca47c0ff0b19d9809"
     cam = InfoCam(input_path)
 
-    thread1 = KThread(target=video_capture, args=(cam, frame_detect_queue, frame_origin_queue))
+    thread1 = KThread(target=video_capture, args=(cam, frame_detect_queue))
     thread2 = KThread(target=inference, args=(cam, frame_detect_queue, detections_queue))
-    thread3 = KThread(target=tracking, args=(cam, frame_origin_queue, detections_queue, tracking_queue))
-    thread4 = KThread(target=drawing, args=(cam, tracking_queue, frame_origin_queue, frame_final_queue))
+    thread3 = KThread(target=tracking, args=(cam, detections_queue, tracking_queue, pose_queue))
+    thread4 = KThread(target=pose_estimate, args=(cam, pose_queue, pose_draw_queue))
+    thread5 = KThread(target=drawing, args=(cam, tracking_queue, frame_final_queue))
 
     thread_manager = []
     thread1.daemon = True  # sẽ chặn chương trình chính thoát khi thread còn sống.
@@ -196,6 +211,9 @@ def main():
     thread4.daemon = True
     thread4.start()
     thread_manager.append(thread4)
+    thread5.daemon = True
+    thread5.start()
+    thread_manager.append(thread5)
 
     while cam.cap.isOpened():
         cv2.namedWindow('output')

@@ -22,7 +22,7 @@ parser.add_argument('--snapshot', default=1, type=int,
 parser.add_argument('--addDPG', default=False, type=bool,
                     help='Train with data augmentation')
 
-"----------------------------- Model options -----------------------------"
+"----------------------------- Models options -----------------------------"
 parser.add_argument('--netType', default='hgPRM', type=str,
                     help='Options: hgPRM | resnext')
 parser.add_argument('--loadModel', default=None, type=str,
