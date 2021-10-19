@@ -1,14 +1,16 @@
 import cv2
 from queue import Queue
-from yolov5_detect_image import Y5Detect, draw_boxes_tracking, draw_det_when_track
+from yolov5_detect_image import Y5Detect, draw_boxes_tracking, draw_det_when_track, draw_single_pose
 import time
 from kthread import KThread
 import numpy as np
 from mot_sort.mot_sort_tracker import Sort
 from mot_sort import untils_track
+from collections import deque
 
 import torch
 from PoseEstimate.PoseEstimateLoader import SPPE_FastPose
+from Actionsrecognition.ActionsEstLoader import TSSTG
 
 y5_model = Y5Detect(weights="model_head/yolov5s.pt")
 class_names = y5_model.class_names
@@ -16,6 +18,9 @@ mot_tracker = Sort(class_names)
 
 inp_pose = (224, 160)
 pose_model = SPPE_FastPose("resnet50", inp_pose[0], inp_pose[1], device="cuda")
+
+# Actions Estimate.
+action_model = TSSTG()
 
 
 class InfoCam(object):
@@ -79,12 +84,12 @@ def to_tlwh(tlbr):
     return box
 
 
-def tracking(cam, detections_queue, tracking_queue, pose_queue):
+def tracking(cam, detections_queue, pose_queue):
     """
     :param cam:
     :param pose_queue:
     :param detections_queue:
-    :param tracking_queue:
+    :param draw_queue:
     :return:
     Tracking using SORT. Hungary + Kalman Filter.
     Using mot_tracker.update()
@@ -110,62 +115,99 @@ def tracking(cam, detections_queue, tracking_queue, pose_queue):
         # print(track_bbs_ids)
         if len(track_bbs_ids) > 0:
             a = 0
-        tracking_queue.put([track_bbs_ids, boxes, labels, scores, unm_trk_ext, image_rgb, frame_count])
-        pose_queue.put([image_rgb, boxes, scores])
+        pose_queue.put([track_bbs_ids, boxes, labels, scores, unm_trk_ext, image_rgb, frame_count])
 
     cam.cap.release()
 
 
-def pose_estimate(cam, pose_queue, pose_draw_queue):
+def pose_estimate(cam, pose_queue, pose_draw_queue, draw_queue, action_data_queue):
+    data_action_rec = []
+    pre_track_id = []
+
     while cam.cap.isOpened():
+        track_bbs_ids, boxes, labels, scores, unm_trk_ext, image_rgb, frame_count = pose_queue.get()
+        if len(track_bbs_ids) > 0:
+            boxes_detect_pose = torch.as_tensor(track_bbs_ids[:, 0:4])
+            scores = torch.as_tensor(np.ones(len(track_bbs_ids)))
+            poses = pose_model.predict(image_rgb, boxes_detect_pose, scores)
+            key_points_pose = [np.concatenate((ps['keypoints'].numpy(), ps['kp_score'].numpy()), axis=1) for ps in poses]
+            # print("key_points_pose: ", key_points_pose)
 
-        image_rgb, boxes, scores = pose_queue.get()
-        if len(scores) > 0:
-            boxes = torch.as_tensor(boxes)
-            scores = torch.as_tensor(scores)
-            try:
-                poses = pose_model.predict(image_rgb, boxes, scores)
-                print("poses", poses)
-            except Exception as e:
-                print(e)
+            current_track_id = track_bbs_ids[:, -1]
+            if len(data_action_rec) > 0:
+                pre_track_id = list(map(lambda d: d['track_id'], data_action_rec))
+
+            for i in range(len(current_track_id)):
+                key_points = key_points_pose[i]
+                if current_track_id[i] not in pre_track_id:
+                    # Create new track
+                    key_points_list = deque(maxlen=30)
+                    key_points_list.append(key_points)
+                    data_action_rec.append({
+                        "track_id": current_track_id[i],
+                        "key_points": key_points_list
+                    })
+                else:
+                    idx_pre_track = pre_track_id.index(current_track_id[i])
+                    data_action_rec[idx_pre_track]["key_points"].append(key_points)
+
+                    # Update key points for track
+
+            pose_draw_queue.put(key_points_pose)
+            draw_queue.put([track_bbs_ids, boxes, labels, scores, unm_trk_ext, image_rgb, frame_count])
+            action_data_queue.put([data_action_rec, image_rgb])
+    cam.cap.release()
+
+
+def action_recognition(cam, action_data_queue):
+    while cam.cap.isOpened():
+        """pts (30, 13, 3)
+        pts:  [[[194.06215    119.31413      0.9018644 ]
+              [223.90459    134.1215       0.88993466]
+              [228.14021    129.88216      0.710703  ]
+              ...
+              [247.1983     234.21288      0.6688115 ]
+              [240.91792    274.54507      0.81022084]
+              [242.95183    261.7644       0.6869712 ]]
+              ...
+              ...
+              [[200.65388    109.802765     0.92303926]
+              [181.53549    133.70076      0.65679896]
+              [176.54015    140.087        0.63335484]
+              ...
+              [156.45757    245.17003      0.87906563]
+              [152.14519    277.01837      0.3391189 ]
+              [143.70879    297.46173      0.86148417]]]
         """
-        poses [{'bbox': tensor([333,  76, 687, 559]), 'bbox_score': tensor(0.51725), 'keypoints': tensor([[435.36005, 168.51997],
-        [488.46002, 221.61998],
-        [520.32001, 200.37997],
-        [467.22003, 295.96002],
-        [477.84003, 274.72000],
-        [403.50003, 306.58002],
-        [424.74002, 274.72000],
-        [552.18005, 359.68002],
-        [605.28003, 338.44003],
-        [530.94000, 455.26001],
-        [626.52002, 423.40002],
-        [520.32001, 529.60004],
-        [658.38007, 497.74005]]), 'kp_score': tensor([[0.88359],
-        [0.87318],
-        [0.78994],
-        [0.85121],
-        [0.62042],
-        [0.82533],
-        [0.72361],
-        [0.72172],
-        [0.74703],
-        [0.74690],
-        [0.71935],
-        [0.79748],
-        [0.87007]]), 'proposal_score': tensor([2.40403])}]
-        """
+        data_action_rec, image_rgb = action_data_queue.get()
+        # print("data_action_rec", len(data_action_rec))
+        # print("data_action_rec", len(data_action_rec[0]["key_points"]))
+        for i in range(len(data_action_rec)):
+            if len(data_action_rec[0]["key_points"]) == 30:
+                out = action_model.predict(data_action_rec[0]["key_points"], image_rgb.shape[:2])
+                action_name = action_model.class_names[out[0].argmax()]
+                print(action_name)
+                action = '{}: {:.2f}%'.format(action_name, out[0].max() * 100)
+                if action_name == 'Fall Down':
+                    clr = (255, 0, 0)
+                elif action_name == 'Lying Down':
+                    clr = (255, 200, 0)
 
     cam.cap.release()
 
 
-def drawing(cam, tracking_queue, frame_final_queue, show_det=False):
+def drawing(cam, tracking_queue, frame_final_queue, pose_draw_queue, show_det=False):
     while cam.cap.isOpened():
         track_bbs_ids, boxes, labels, scores, unm_trk_ext, image_rgb, frame_count = tracking_queue.get()
+        key_points_pose = pose_draw_queue.get()
         frame_origin = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
         if frame_origin is not None:
             image = draw_boxes_tracking(frame_origin, track_bbs_ids, scores=scores, labels=labels,
                                         class_names=class_names, track_bbs_ext=unm_trk_ext)
+
+            for i in range(len(key_points_pose)):
+                draw_single_pose(frame_origin, key_points_pose[i], joint_format='coco')
+
             if show_det:
                 image = draw_det_when_track(frame_origin, boxes, scores=scores, labels=labels,
                                             class_names=class_names)
@@ -185,18 +227,20 @@ def save_debug_image(frame_count, image):
 def main():
     frame_detect_queue = Queue(maxsize=1)
     pose_queue = Queue(maxsize=1)
+    action_data_queue = Queue(maxsize=1)
     pose_draw_queue = Queue(maxsize=1)
     detections_queue = Queue(maxsize=1)
-    tracking_queue = Queue(maxsize=1)
+    draw_queue = Queue(maxsize=1)
     frame_final_queue = Queue(maxsize=1)
     input_path = "https://minio.core.greenlabs.ai/clover/fall_detection/fall_detect.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20211018%2F%2Fs3%2Faws4_request&X-Amz-Date=20211018T063245Z&X-Amz-Expires=432000&X-Amz-SignedHeaders=host&X-Amz-Signature=e711d8737a4f22831169fdfc7008e66e22eb024a853b430ca47c0ff0b19d9809"
     cam = InfoCam(input_path)
 
     thread1 = KThread(target=video_capture, args=(cam, frame_detect_queue))
     thread2 = KThread(target=inference, args=(cam, frame_detect_queue, detections_queue))
-    thread3 = KThread(target=tracking, args=(cam, detections_queue, tracking_queue, pose_queue))
-    thread4 = KThread(target=pose_estimate, args=(cam, pose_queue, pose_draw_queue))
-    thread5 = KThread(target=drawing, args=(cam, tracking_queue, frame_final_queue))
+    thread3 = KThread(target=tracking, args=(cam, detections_queue, pose_queue))
+    thread4 = KThread(target=pose_estimate, args=(cam, pose_queue, pose_draw_queue, draw_queue, action_data_queue))
+    thread5 = KThread(target=action_recognition, args=(cam, action_data_queue))
+    thread6 = KThread(target=drawing, args=(cam, draw_queue, frame_final_queue, pose_draw_queue))
 
     thread_manager = []
     thread1.daemon = True  # sẽ chặn chương trình chính thoát khi thread còn sống.
@@ -214,6 +258,9 @@ def main():
     thread5.daemon = True
     thread5.start()
     thread_manager.append(thread5)
+    thread6.daemon = True
+    thread6.start()
+    thread_manager.append(thread6)
 
     while cam.cap.isOpened():
         cv2.namedWindow('output')
