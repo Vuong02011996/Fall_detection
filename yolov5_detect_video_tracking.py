@@ -12,7 +12,7 @@ import torch
 from PoseEstimate.PoseEstimateLoader import SPPE_FastPose
 from Actionsrecognition.ActionsEstLoader import TSSTG
 
-y5_model = Y5Detect(weights="model_head/yolov5s.pt")
+y5_model = Y5Detect(weights="model_yolov5/yolov5s.pt")
 class_names = y5_model.class_names
 mot_tracker = Sort(class_names)
 
@@ -120,7 +120,7 @@ def tracking(cam, detections_queue, pose_queue):
     cam.cap.release()
 
 
-def pose_estimate(cam, pose_queue, pose_draw_queue, draw_queue, action_data_queue):
+def pose_estimate(cam, pose_queue, pose_draw_queue, action_data_queue):
     data_action_rec = []
     pre_track_id = []
 
@@ -136,63 +136,62 @@ def pose_estimate(cam, pose_queue, pose_draw_queue, draw_queue, action_data_queu
             current_track_id = track_bbs_ids[:, -1]
             if len(data_action_rec) > 0:
                 pre_track_id = list(map(lambda d: d['track_id'], data_action_rec))
+            # Delete pre_track_id not in current_track_id, track is deleted.
+            track_id_delete = np.setdiff1d(pre_track_id, current_track_id)
+            if len(track_id_delete) > 0:
+                for track_id in track_id_delete:
+                    index_del = pre_track_id.index(track_id)
+                    del data_action_rec[index_del]
+                    pre_track_id.remove(track_id)
+                    a = 0
 
-            for i in range(len(current_track_id)):
-                key_points = key_points_pose[i]
-                if current_track_id[i] not in pre_track_id:
-                    # Create new track
-                    key_points_list = deque(maxlen=30)
-                    key_points_list.append(key_points)
-                    data_action_rec.append({
-                        "track_id": current_track_id[i],
-                        "key_points": key_points_list
-                    })
-                else:
-                    idx_pre_track = pre_track_id.index(current_track_id[i])
-                    data_action_rec[idx_pre_track]["key_points"].append(key_points)
-
-                    # Update key points for track
+            if len(key_points_pose) == len(current_track_id):
+                for i in range(len(current_track_id)):
+                    try:
+                        key_points = key_points_pose[i]
+                    except Exception as e:
+                        print(e)
+                    if current_track_id[i] not in pre_track_id:
+                        # Create new track
+                        key_points_list = deque(maxlen=30)
+                        key_points_list.append(key_points)
+                        data_action_rec.append({
+                            "track_id": current_track_id[i],
+                            "key_points": key_points_list
+                        })
+                    else:
+                        idx_pre_track = pre_track_id.index(current_track_id[i])
+                        data_action_rec[idx_pre_track]["key_points"].append(key_points)
+                        # Update key points for track
+            else:
+                print("len(key_points_pose) != len(current_track_id)")
 
             pose_draw_queue.put(key_points_pose)
-            draw_queue.put([track_bbs_ids, boxes, labels, scores, unm_trk_ext, image_rgb, frame_count])
-            action_data_queue.put([data_action_rec, image_rgb])
+            # draw_queue.put([track_bbs_ids, boxes, labels, scores, unm_trk_ext, image_rgb, frame_count])
+            action_data_queue.put([data_action_rec, image_rgb, track_bbs_ids, boxes, labels, scores, unm_trk_ext, frame_count])
     cam.cap.release()
 
 
-def action_recognition(cam, action_data_queue):
+def action_recognition(cam, action_data_queue, draw_queue):
+    action_name = 'pending..'
     while cam.cap.isOpened():
-        """pts (30, 13, 3)
-        pts:  [[[194.06215    119.31413      0.9018644 ]
-              [223.90459    134.1215       0.88993466]
-              [228.14021    129.88216      0.710703  ]
-              ...
-              [247.1983     234.21288      0.6688115 ]
-              [240.91792    274.54507      0.81022084]
-              [242.95183    261.7644       0.6869712 ]]
-              ...
-              ...
-              [[200.65388    109.802765     0.92303926]
-              [181.53549    133.70076      0.65679896]
-              [176.54015    140.087        0.63335484]
-              ...
-              [156.45757    245.17003      0.87906563]
-              [152.14519    277.01837      0.3391189 ]
-              [143.70879    297.46173      0.86148417]]]
-        """
-        data_action_rec, image_rgb = action_data_queue.get()
+        data_action_rec, image_rgb, track_bbs_ids, boxes, labels, scores, unm_trk_ext, frame_count = action_data_queue.get()
         # print("data_action_rec", len(data_action_rec))
         # print("data_action_rec", len(data_action_rec[0]["key_points"]))
-        for i in range(len(data_action_rec)):
-            if len(data_action_rec[0]["key_points"]) == 30:
-                out = action_model.predict(data_action_rec[0]["key_points"], image_rgb.shape[:2])
+        print("len(data_action_rec)", len(data_action_rec))
+        for i in range(len(data_action_rec)): 
+            if len(data_action_rec[i]["key_points"]) == 30:
+                """pts (30, 13, 3)"""
+                pts = np.array(data_action_rec[i]["key_points"], dtype=np.float32)
+                out = action_model.predict(pts, image_rgb.shape[:2])
                 action_name = action_model.class_names[out[0].argmax()]
-                print(action_name)
+                # print(action_name)
                 action = '{}: {:.2f}%'.format(action_name, out[0].max() * 100)
                 if action_name == 'Fall Down':
                     clr = (255, 0, 0)
                 elif action_name == 'Lying Down':
                     clr = (255, 200, 0)
-
+        draw_queue.put([track_bbs_ids, boxes, labels, scores, unm_trk_ext, image_rgb, frame_count])
     cam.cap.release()
 
 
@@ -238,8 +237,8 @@ def main():
     thread1 = KThread(target=video_capture, args=(cam, frame_detect_queue))
     thread2 = KThread(target=inference, args=(cam, frame_detect_queue, detections_queue))
     thread3 = KThread(target=tracking, args=(cam, detections_queue, pose_queue))
-    thread4 = KThread(target=pose_estimate, args=(cam, pose_queue, pose_draw_queue, draw_queue, action_data_queue))
-    thread5 = KThread(target=action_recognition, args=(cam, action_data_queue))
+    thread4 = KThread(target=pose_estimate, args=(cam, pose_queue, pose_draw_queue, action_data_queue))
+    thread5 = KThread(target=action_recognition, args=(cam, action_data_queue, draw_queue))
     thread6 = KThread(target=drawing, args=(cam, draw_queue, frame_final_queue, pose_draw_queue))
 
     thread_manager = []
