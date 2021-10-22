@@ -289,9 +289,9 @@ def draw_single_pose(frame, pts, joint_format='coco'):
 
 
 if __name__ == '__main__':
-    y5_model = Y5Detect(weights="/home/vuong/Downloads/weights-20210623T083425Z-001/weights/best.pt")
+    y5_model = Y5Detect(weights="/home/thien/Desktop/Huy/Fall_detection/model_yolov5/yolov5s.pt")
 
-    img_path = "/home/vuong/Downloads/task_dltm_rac_thai_chai_1-2021_06_17_09_15_04-yolo 1.1/obj_train_data/"
+    img_path = "/home/thien/Desktop/Huy/Fall_detection/Image/"
 
     list_image_test = glob(img_path + "*.jpg")
     for image_test in list_image_test:
