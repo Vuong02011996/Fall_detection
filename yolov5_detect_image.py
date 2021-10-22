@@ -6,6 +6,7 @@ from utils.general import check_img_size, non_max_suppression, scale_coords
 from utils.datasets import letterbox
 import cv2
 from glob import glob
+from unidecode import unidecode
 
 
 class Y5Detect:
@@ -191,6 +192,36 @@ def draw_boxes_tracking(image, track_bbs_ids, scores, labels, class_names, track
         # put id track to image
         cv2.putText(image, str(track_id), (xmin, ymin + 10), cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255),
                     3)
+    if track_bbs_ext is not None:
+        for b in track_bbs_ext:
+            xmin, ymin, xmax, ymax = list(map(int, b))
+            color = (0, 0, 0)
+            cv2.rectangle(image, (xmin, ymin), (xmax, ymax), color, line_thickness)
+            cv2.putText(image, "track_ext", (xmin, ymin + 10), cv2.FONT_HERSHEY_SIMPLEX, 1, color,
+                        1)
+
+    return image
+
+
+def draw_data_action(image, track_bbs_ids, track_bbs_ext=None, data_action=None, line_thickness=1):
+    for idx, b in enumerate(track_bbs_ids):
+        xmin, ymin, xmax, ymax, track_id = list(map(int, b))
+        color = (0, 0, 255)
+        cv2.rectangle(image, (xmin, ymin), (xmax, ymax), color, line_thickness)
+        # put id track to image
+        cv2.putText(image, str(track_id), (xmin, ymin + 10), cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255),
+                    3)
+        if len(track_bbs_ids) == len(data_action):
+            if data_action is not None and "action_name" in data_action[idx]:
+                if data_action[idx]["action_name"] == "Fall Down":
+                    cv2.putText(image, unidecode("Té Ngã"), (xmin, ymin + 60), cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255),
+                                2)
+                if data_action[idx]["action_name"] == "Lying Down":
+                    cv2.putText(image, unidecode("Nằm"), (xmin, ymin + 60), cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255),
+                                2)
+                if data_action[idx]["action_name"] == "Walking" or data_action[idx]["action_name"] == "Standing":
+                    cv2.putText(image, unidecode("Đứng or Đi"), (xmin, ymin + 60), cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 0, 255),
+                                2)
     if track_bbs_ext is not None:
         for b in track_bbs_ext:
             xmin, ymin, xmax, ymax = list(map(int, b))

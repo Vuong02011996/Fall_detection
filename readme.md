@@ -24,3 +24,8 @@ Openpose:
   and foot keypoints (in total 135 keypoints) on single images
 
 Alpha Pose: 
+
+
+
+# App
++ http://14.241.120.239:8001/clover/v2.0/fall_detection
