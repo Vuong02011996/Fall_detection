@@ -1,6 +1,8 @@
 # Pose Estimation
-## Alpha Pose
 
+## Alpha Pose
++ [doc](https://www.mvig.org/research/alphapose.html)
++ SPPE : single-person pose estimator
 ## Pre-Trained Models
 
 - Tiny-YOLO oneclass - [.pth](https://drive.google.com/file/d/1obEbWBSm9bXeg10FriJ7R2cGLRsg-AfP/view?usp=sharing),
@@ -8,6 +10,10 @@
 - SPPE FastPose (AlphaPose) - [resnet101](https://drive.google.com/file/d/1N2MgE1Esq6CKYA6FyZVKpPwHRyOCrzA0/view?usp=sharing),
 [resnet50](https://drive.google.com/file/d/1IPfCDRwCmQDnQy94nT1V-_NVtTEi4VmU/view?usp=sharing)
 - ST-GCN action recognition - [tsstg](https://drive.google.com/file/d/1mQQ4JHe58ylKbBqTjuKzpwN2nwKOWJ9u/view?usp=sharing)
+
+# Action recognition
+## Data
++ https://drive.google.com/drive/folders/19KTp4-0Q4RL7MRsd0Gqxbt-1oKA-pbeY
 
 
 # Ref

@@ -16,8 +16,9 @@ class TSSTG(object):
                  weight_file='./Models/TSSTG/tsstg-model.pth',
                  device='cuda'):
         self.graph_args = {'strategy': 'spatial'}
-        self.class_names = ['Standing', 'Walking', 'Sitting', 'Lying Down',
-                            'Stand up', 'Sit down', 'Fall Down']
+        # self.class_names = ['Standing', 'Walking', 'Sitting', 'Lying Down',
+        #                     'Stand up', 'Sit down', 'Fall Down']
+        self.class_names = ['Normal', 'Fall Down']
         self.num_class = len(self.class_names)
         self.device = device
 

@@ -244,7 +244,7 @@ def main():
     global outputFrame, lock, input_path
     cv2_show = False
     if cv2_show:
-        input_path = "https://minio.core.greenlabs.ai/clover/fall_detection/fall_detection1.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20211021%2F%2Fs3%2Faws4_request&X-Amz-Date=20211021T073136Z&X-Amz-Expires=432000&X-Amz-SignedHeaders=host&X-Amz-Signature=26e19be6f47f0b10da7ada4562d628376e4123235d4a430be70e7ceed2ca1567"
+        input_path = "https://minio.core.greenlabs.ai/clover/fall_detection/fall_detect.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20211217%2F%2Fs3%2Faws4_request&X-Amz-Date=20211217T032735Z&X-Amz-Expires=432000&X-Amz-SignedHeaders=host&X-Amz-Signature=f2e4553eaf81fc21f56d1c4d6f9b4074680c8577c96e9e4a483ef338da7a36f0"
     cam = InfoCam(input_path)
 
     thread1 = KThread(target=video_capture, args=(cam, frame_detect_queue))
