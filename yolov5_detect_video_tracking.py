@@ -17,7 +17,7 @@ class_names = y5_model.class_names
 mot_tracker = Sort(class_names)
 
 inp_pose = (224, 160)
-pose_model = SPPE_FastPose("resnet50", inp_pose[0], inp_pose[1], device="cuda")
+pose_model = SPPE_FastPose("resnet50", inp_pose[0], inp_pose[1], device="cpu")
 
 # Actions Estimate.
 action_model = TSSTG()
